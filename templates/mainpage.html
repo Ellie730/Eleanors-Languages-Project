@@ -1,0 +1,45 @@
+{% extends "layout.html" %}
+
+{% block title %}
+mainpage
+{% endblock %}
+
+{% block body %}
+
+<table>
+    <thead>
+        <tr>
+            <th>id</th>
+            <th>name</th>
+            <th>author</th>
+            <th>date</th>
+            <th>medium</th>
+            <th>genre</th>
+            <th>progress</th>
+            <th>weighted progress</th>
+            <th>size</th>
+            <th>public or private</th>
+            <th>edit deck</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in display %}
+        <tr>
+            <td>{{ row.deck.id }}</td>
+            <td>{{ row.deck.name }}</td>
+            <td>{{ row.deck.author }} </td>
+            <td>{{ row.deck.date }}</td>
+            <td>{{ row.deck.medium }}</td>
+            <td>{{ row.deck.genre }}</td>
+            <td>{{ row.users_to_decks.progress }}</td>
+            <td>{{ row.users_to_decks.weighted }}</td>
+            <td>{{ row.deck.public }} {% if user == row.deck.creator %}<a href = "/change_status?status=?&id=?", {{ row.deck.public }}, {{ row.deck.id }}><button> change </button></a>{% endif %}</td>
+            <td><a href = "/edit_deck?deck=?", {{ row.deck.id }}><button>edit deck</button></a></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+    
+</table>
+
+{% endblock %}

@@ -26,50 +26,70 @@ def index():
     """SELECT * FROM decks JOIN users_to_decks ON decks.id = users_to_decks.deck_id 
     WHERE user_id = ? AND decks.language = ?"""
     , session["user_id"], session["language"])
-    for deck in decks:
-        known = db.execute("""SELECT COUNT (*) FROM user_progress WHERE state = known AND user_id = ? 
+        for deck in decks:
+        known = db.execute("""SELECT COUNT (*) FROM user_progress WHERE state = learning OR state = learned AND user_id = ? 
         AND card_id IN (SELECT card_id FROM deck_contents WHERE deck_id = ?)""",
         session["user_id"], deck["decks.id"])
-        db.execute("UPDATE users_to_decks SET progress = ? WHERE deck_id = ? AND user_id = ?", known/deck["decks.size"], deck[decks.id], session["user_id"])
+        frequency = db.execute("""SELECT SUM (frequency) FROM user_progress 
+        WHERE user_id = ? AND word_id IN 
+        (SELECT word_id FROM deck_contents WHERE deck_id = ?)""", session["user_id"], deck["decks.id"])
+        weighted = db.execute ("""SELECT SUM (frequency) FROM user_progress 
+        WHERE state = learning OR state = learned AND user_id = ? AND word_id IN 
+        (SELECT word_id FROM deck_contents WHERE deck_id = ?)""", session["user_id"], deck["decks.id"])
+        db.execute("""UPDATE users_to_decks SET progress = ? weighted = ? 
+        WHERE deck_id = ? AND user_id = ?""", known/deck["decks.size"], weighted/frequency,deck[decks.id], session["user_id"])
     order = db.execute ("SELECT deck_order FROM settings WHERE user_id = ?")[0]["deck_order"]
     display =  db.execute("SELECT * FROM decks JOIN decks ON decks.id = users_to_decks.deck_id WHERE users_to_decks.user_id = ? ORDER BY ?", session["user_id"], order)
 
-    
-
-    return render_template ("mainpage.html", display = display)
+    return render_template ("mainpage.html", display = display, user = session["user_id"])
 
 
 
-@app.route("/deck")
+@app.route("/change_language")
 @login_required
-def deck():
+def change_language()
 
-    
+    language = request.args.get("language")
+    session["language"] = language
+    db.execute ("UPDATE users SET language = ? WHERE id = ?", language, session["user_id"])
+    return redirect("/")
 
-@app.route("/new_deck" methods = ["GET", "POST"])
+
+
+@app.route("change_status")
 @login_required
-def new_deck()
-    
-    if request.method == POST:
-        #get the required variables from the form
-        language = request.form.get ("language")
-        presence(language, "language")
-        if language != session["language"]:
-            session["language"] = language
-            db.execute("UPDATE users SET language = ? WHERE id = ?", language, session["user_id"])
-        name = request.form.get("name")
-        presence(name, "name")
-        medium = request.form.get("medium")
-        genre = request.form.get("genre")
-        author = request.form.get("author")
-        date = request.form.get("date")
-        #use the decks table to enter this data
-        db.execute("INSERT INTO decks (language, name, medium, genre, author, date) VALUES (?,?,?,?,?,?)", language, name, medium, genre, author, date)
-        session["deck_id"] = db.execute("SELECT id FROM decks WHERE name = ?", name)[0]["name"]
-        return redirect ("/input")
+def change_status():
+    status = request.args.get("status")
+    id = request.args.get("id")
+    if status == public:
+        db.execute ("UPDATE decks SET status = private WHERE deck_id = ?", id)
+    if status == private:
+        db.execute ("UPDATE decks SET status = public WHERE deck_id = ?", id)
+    return redirect ("/")
 
-    else: 
-        return render_template("new_deck.html")
+
+
+@app.route("/edit_deck")
+@login_required
+def edit_deck():
+
+    # check if the current user is the creator of the deck 
+    deck = request.args.get("deck")
+    creator = db.execute ("SELECT creator_id FROM decks WHERE id = ?", deck)[0]["creator_id"]
+
+    #else make a new deck that contains the same info, to be edited
+    if session["user_id"] != creator:
+        deck_info = db.execute ("SELECT * FROM decks WHERE deck_id = ?", deck)
+        db.execute ("""INSERT INTO decks (language, name, medium, genre, author, date, size, creator_id, public) values (?,?,?,?,?,?,?,?, private)"""
+        , session["language"], deck_info[0]["name"], deck_info[0]["medium"], deck_info[0]["genre"], deck_info[0]["author"], deck_info[0]["date"], deck_info[0]["size"], session["user_id"])
+        user_info = db.execute("SELECT * FROM users_to_decks WHERE user_id = ? AND deck_id = ?", session["user_id"], deck)
+        edited_id = db.execute("SELECT id FROM decks WHERE name = ? AND creator_id = ?", deck_info[0]["name"], session["user_id"])
+        db.execute ("""INSERT INTO users_to_decks (user_id, deck_id, progress, order, weighted) VALUES (?,?,?,?,?)"""
+        , session["user_id"], edited_id[0]["id"], user_info[0]["progress"], user_info[0]["order"], user_info[0]["weighted"] )
+        db.execute ("DELETE FROM users_to_decks WHERE user_id = ? AND deck_id = ?", session["user_id"], deck)
+    session["deck_id"] = edited_id[0]["id"]
+    
+    return redirect ("/input")
 
 
 
@@ -77,9 +97,7 @@ def new_deck()
 @login_required
 def input():
 
-    ### TODO: Make a duplicate deck when a deck is updated, rather than updating the whole deck
-
-    #display the npage
+    #display the page
     if not input_type:
         return render_template("input.html", deck = deck)
     
@@ -116,7 +134,7 @@ def input():
         user_words.append(uwords[word]["word_id"])
 
     #for each word, if it is new create a card. 
-    uncommon = []
+    session["uncommon"] = []
     
     for word in new:
         if word not in existing:
@@ -124,7 +142,8 @@ def input():
 
             #if data cannot be found it is an uncommon word, store for later
             if not json["translation"]:
-                uncommon.append(word)
+                session["uncommon"].append(word)
+                session["uncommon_frequency"][0].append(cards[word])
             db.execute ("""INSERT INTO words (word, language, definition, frequency, part, common) 
             VALUES(?,?,?,?,?,common)""" word, session["language"], values["definition"], values["frequency"], values["part"])
 
@@ -147,6 +166,11 @@ def input():
             frequency = db.execute("""SELECT frequency FROM user_progress WHERE user_id = ? AND word_id = ?""",
             session["user_id"], word_id)[0]["frequency"] + new[word]
             db.execute("""UPDATE user_progress SET frequency = ? WHERE user_id = ?, word_id = ?""", frequency, session["user_id"], word_id)
+
+    size = db.execute ("SELECT COUNT(*) FROM deck_contents WHERE deck_id = ?", session["deck_id"])
+    db.execute("""UPDATE decks SET size = ? WHERE deck_id = ?""", size, session["deck_id"])
+
+    return redirect ("/uncommon")
 
 
 
@@ -197,6 +221,49 @@ def logout():
 
 
 
+@app.route("/my_deck")
+@login_required
+def my_deck():
+
+    #display 50 cards in the deck
+    page = request.args.get("page")
+    pages = (db.execute ("SELECT size FROM decks WHERE deck_id  = ?", session["deck_id"])[0]["size"] - 1) / 50
+    order = db.execute ("SELECT card_order FROM users WHERE id = ?", session["user_id"])[0]["card_order"]
+    cards = db.execute (""" SELECT * from words
+    JOIN user_progress ON words.id = user_progress.word_id
+    WHERE deck_id = ? AND user_id = ?
+    ORDER BY ? LIMIT ?,50""", session["deck_id"], session["user_id"], order, 50*page)
+    return render_template ("deck.html", cards = cards, page = page)
+
+
+
+@app.route("/new_deck" methods = ["GET", "POST"])
+@login_required
+def new_deck()
+    
+    if request.method == POST:
+        #get the required variables from the form
+        language = request.form.get ("language")
+        presence(language, "language")
+        if language != session["language"]:
+            session["language"] = language
+            db.execute("UPDATE users SET language = ? WHERE id = ?", language, session["user_id"])
+        name = request.form.get("name")
+        presence(name, "name")
+        medium = request.form.get("medium")
+        genre = request.form.get("genre")
+        author = request.form.get("author")
+        date = request.form.get("date")
+        #use the decks table to enter this data
+        db.execute("INSERT INTO decks (language, name, medium, genre, author, date) VALUES (?,?,?,?,?,?)", language, name, medium, genre, author, date)
+        session["deck_id"] = db.execute("SELECT id FROM decks WHERE name = ?", name)[0]["name"]
+        return redirect ("/input")
+
+    else: 
+        return render_template("new_deck.html")
+
+
+
 @app.route("/register", methods=["GET", "POST"])
 def register():
 
@@ -224,11 +291,114 @@ def register():
         return render_template ("register.html")
 
 
+
 @app.route("/review", methods=["GET", "POST"])
 @login_required
 def review():
     
-    if request.method == POST:
+        else:
+
+        update()
+        #decide what the next card to show is and display it
+
+        #if the reviewed percentage is greater than the new percentage, show a new card
+        #TODO: make the counts for each language independent
+        if session[session["language"]]["new_seen"]/session["new_cards"] < session[session["language"]]["reviewed"]/session[session["language"]]["review_count"] AND session["new_seen"]:
+            card = db.execute ("""SELECT * FROM user_progress 
+            JOIN words ON user_progress.word_id = words.id 
+            WHERE user_progress.user_id = ? AND user_progress.state = new AND card_id IN 
+            (SELECT card_id FROM deck_contents WHERE deck_id = ?)
+            ORDER BY ? LIMIT 1""", session["user_id"], session["deck_id"], session["order"])
+            session["state"] = "new"
+
+        #if possible, choose the longest overdue card with interval < 1 hr
+        else:
+            card = db.execute ("""SELECT * FROM user_progress 
+            JOIN words ON user_progress.word_id = words.id 
+            WHERE user_progress.user_id = ? AND user_progress.state = seen AND words.language = ? 
+            AND user_pogress.due < ? AND user_progress.interval < 3600
+            ORDER BY due LIMIT 1""", session["user_id"], session["language"], datetime.now())
+
+            session["state"] = "review"
+
+            # if there is no short interval card, choose long interval card
+            if not card:
+                card = db.execute ("""SELECT * FROM user_progress 
+                JOIN words ON user_progress.word_id = words.id 
+                WHERE user_progress.user_id = ? AND user_progress.state = seen AND words.language = ? 
+                AND user_pogress.due < ? 
+                ORDER BY due LIMIT 1""", session["user_id"], session["language"], datetime.now())
+        
+        # if there are any short interval cards to review, do so before ending the session
+        if not card:
+            card = db.execute ("""SELECT * FROM user_progress 
+            JOIN words ON user_progress.word_id = words.id 
+            WHERE user_progress.user_id = ? AND user_progress.state = seen AND words.language = ? 
+             AND user_progress.interval < 3600
+            ORDER BY due LIMIT 1""", session["user_id"], session["language"])
+        
+        # if there are no cards left to review, display session over
+        if not card:
+            return render_template ("end_review.html")
+
+        else:
+            session["card"]= card[0]["words.id"]
+            return render_template ("card.html", card = card)
+        
+            
+
+@app.route("/search_decks" methods=["GET", "POST"])
+@login_required
+def search_decks ()
+    
+    if request.method == post:
+
+        id = request.form.get ("id")
+        name = request.form.get("name")
+        medium = request.form.get("medium")
+        genre = request.form.get("genre")
+        author = request.form.get("author")
+        date = request.form.get("date")
+    
+    matching = ("""SELECT * FROM decks WHERE id = ?  AND language = ? AND name LIKE ? AND medium LIKE ? AND genre LIKE ? AND author LIKE ? AND date LIKE ? AND public = public"""
+    , id, session["language"], name, medium, genre, author, date)
+    return render_template ("found.html")
+
+    else:
+        return render_template ("search_decks.html")
+
+
+@app.route("/settings" methods = ["GET", "POST"])
+@login_required
+def settings ():
+    
+    if request.method == post:
+        
+        #update card order
+        card_order = request.form.get ("card_order")
+        if card_order:
+            db.execute ("UPDATE users SET card_order = ? WHERE user_id = ?", card_order, session["user_id"])
+
+        #update number of new cards
+        new_cards = int(request.form.get ("new_cards"))
+        if new_cards:
+            db.execute ("UPDATE users SET new_cards = ? WHERE user_id = ?", new_cards, session["user_id"])
+
+        #update deck order
+        deck_order = request.form.get ("deck_order")
+        if deck_order:
+            db.execute ("UPDATE users SET deck_order = ? WHERE user_id = ?", deck_order, session["user_id"])
+
+    else:
+        return render_template ("settings.html")
+
+
+
+@app.route("/show_card" methods = ["GET", "POST"])
+@login_required
+def show_card():
+
+    if request.method =="POST":       
 
         #reset time
         update()
@@ -270,66 +440,79 @@ def review():
         viewings = db.execute ("SELECT * FROM user_progress WHERE user_id = ? AND word_id = ?", session["user_id"], session["card"])[0]
         db.execute("""UPDATE user_progress SET due = ? seen = ? interval = ? viewings = ?
         WHERE user_id = ? AND word_id = ?""", due, session["datetime"], interval, viewings["viewings"] + 1, session["user_id"], session["card"])
-        value = db.execute("SELECT * FROM ")
+        
+        #update the specific viewing category
         if multiplier = 0:
             db.execute("""UPDATE user_progress SET none = ? WHERE user_id = ? AND card_id = ?"""
             , viewings["none"] + 1, session["user_id"], session["card"])
         elif multiplier = 0.05:
+            db.execute("""UPDATE user_progress SET some = ? WHERE user_id = ? AND card_id = ?"""
+            , viewings["some"] + 1, session["user_id"], session["card"])
         elif multiplier = 1:
+            db.execute("""UPDATE user_progress SET okay = ? WHERE user_id = ? AND card_id = ?"""
+            , viewings["okay"] + 1, session["user_id"], session["card"])
         elif multiplier = 2:
+            db.execute("""UPDATE user_progress SET good = ? WHERE user_id = ? AND card_id = ?"""
+            , viewings["good"] + 1, session["user_id"], session["card"])
         elif multiplier = 3:
-
+            db.execute("""UPDATE user_progress SET easy = ? WHERE user_id = ? AND card_id = ?"""
+            , viewings["easy"] + 1, session["user_id"], session["card"])
         
+        #if already seen, update state and the number of reviews
+        if session["state"] = "review":
+            if interval < 2500000:
+                db.execute ("""UPDATE user_progress SET state = ? WHERE user_id = ? AND card_id = ?"""
+                , "learned", session["user_id"], session["card"])
+            else:
+                db.execute("""UPDATE user_progress SET state = ? WHERE user_id = ? AND card_id = ?"""
+                , "learning", session["user_id"], session["card"])
+            session[session["language"]]["reviewed"] += 1
         
-            
-
+        #if the card was new change state to learning, and count a new card seen
+        else:
+            db.execute("""UPDATE user_progress SET state = ? WHERE user_id = ? AND card_id = ?"""
+            , "learning", session["user_id"], session["card"])
+            session[session["language"]]["new_seen"] +=1
+        
+        return redirect ("/review")
 
     else:
 
-        update()
-        #decide what the next card to show is and display it
+        card = db.execute("""SELECT * from cards JOIN user_progress ON user_progress.card_id = cards.id 
+        WHERE cards.id = ? and user_id = ?""", session["card"], session["user_id"])
 
-        #if the reviewed percentage is greater than the new percentage, show a new card
-        #TODO: make the counts for each language independent
-        if session["new_seen"]/session["new_cards"] < session["reviewed"]/session["review_count"] AND session["new_seen"]:
-            card = db.execute ("""SELECT * FROM user_progress 
-            JOIN words ON user_progress.word_id = words.id 
-            WHERE user_progress.user_id = ? AND user_progress.state = new AND card_id IN 
-            (SELECT card_id FROM deck_contents WHERE deck_id = ?)
-             ORDER BY ? LIMIT 1""", session["user_id"], session["deck_id"], session["order"])
 
-        #if possible, choose the longest overdue card with interval < 1 hr
-        else:
-            card = db.execute ("""SELECT * FROM user_progress 
-            JOIN words ON user_progress.word_id = words.id 
-            WHERE user_progress.user_id = ? AND user_progress.state = seen AND words.language = ? 
-            AND user_pogress.due < ? AND user_progress.interval < 3600
-            ORDER BY due LIMIT 1""", session["user_id"], session["language"], datetime.now())
 
-            # if there is no short interval card, choose long interval card
-            if not card:
-                card = db.execute ("""SELECT * FROM user_progress 
-                JOIN words ON user_progress.word_id = words.id 
-                WHERE user_progress.user_id = ? AND user_progress.state = seen AND words.language = ? 
-                AND user_pogress.due < ? 
-                ORDER BY due LIMIT 1""", session["user_id"], session["language"], datetime.now())
+@app.route("/uncommon" methods = ["GET", "POST"])
+@login_required
+def uncommon():
+
+    if request.method == "POST":
+        definition = request.args.get("definition")
+        frequency = request.args.get("frequency")
+        example = request.args.get("example")
+        part = request.args.get("part")
         
-        # if there are any short interval cards to review, do so before ending the session
-        if not card:
-            card = db.execute ("""SELECT * FROM user_progress 
-            JOIN words ON user_progress.word_id = words.id 
-            WHERE user_progress.user_id = ? AND user_progress.state = seen AND words.language = ? 
-             AND user_progress.interval < 3600
-            ORDER BY due LIMIT 1""", session["user_id"], session["language"])
-        
-        # if there are no cards left to review, display session over
-        if not card:
-            return render_template ("end_review.html")
+        if definition:
+            db.execute("""INSERT INTO words (language, word, definition, frequency, example, part, common) 
+            VALUES (?,?,?,?,?,?, uncommon)""", session["language"], session["uncommon"][0], definition, frequency, example, part)
+            db.execute("""INSERT INTO user_progress (user_id, word_id, viewings, easy, good, ok, some, none, state, frequency) 
+            VALUES (?,(SELECT id FROM words WHERE word = ? AND language = ? AND definition = ? and common = uncommon),0,0,0,0,0,0, new)""",
+            session["user_id"], session["uncommon"][0], language, definition, session["uncommon_frequency"][0])
+            db.execute ("""INSERT INTO deck_contents (deck_id, card_id, frequency) 
+            VALUES (?,(SELECT id FROM words WHERE word = ? AND language = ? AND definition = ? and common = uncommon),?)""", session["deck_id"], session["uncommon"][0], language, definition, session["uncommon_frequency"][0])
+
+        session["uncommon"].pop(0)
+        session["uncommon_frequency"].pop(0)
+        return redirect ("/uncommon")
+
+
+    else:
+        #pick the next word that hasn't been dealt with
+        word = session["uncommon"][0]
+    
+        if not word:
+            return redirect ("/")
 
         else:
-            session["card"]= card[0]["words.id"]
-            return render_template ("card.html", card = card)
-        
-            
-
-@app.route("/search_decks" methods=["GET", "POST"])
+            return render_template ("uncommon.html", word = word)

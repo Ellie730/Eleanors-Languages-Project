@@ -1,0 +1,27 @@
+{% extends "layout.html" %}
+
+{% block title %}
+
+new deck
+
+{% endblock %}
+
+{% block body %}
+<form action = "/new_deck" method = "post">
+    <div>
+        <input autocomplete ="off" autofocus name="language" placeholder="language" type="text">
+    </div>
+    <div>
+        <input autocomplete ="off" autofocus name="medium" placeholder="name" type="text">
+    </div>
+    <div>
+        <input autocomplete ="off" autofocus name="genre" placeholder="genre" type="text">
+    </div>
+    <div>
+        <input autocomplete ="off" autofocus name="author" placeholder="author" type="text">
+    </div>
+    <div>
+        <input autocomplete ="off" autofocus name="date" placeholder="date" type="text">
+    </div>
+</form>
+{% endblock %}
