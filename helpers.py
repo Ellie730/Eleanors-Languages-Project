@@ -5,6 +5,17 @@ from flask import Flask, flash, redirect, render_template, request, session
 from flask_session import Session
 from werkzeug.security import check_password_hash, generate_password_hash
 
+def lemmatise(word, language):
+
+#hopefully we can just download a dictionary of words and process the whole thing without api requests !!!
+    if language == "Italian":
+        
+
+    if language == "Spanish":
+
+
+def lookup(word)
+
 def presence(variable, vname):
     if not variable:
         return apology(f"please enter a {vname}")

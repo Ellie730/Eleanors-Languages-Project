@@ -112,7 +112,7 @@ def input():
     # lemmatise each word and get a list of words and their frequencies
     lemmas = []
     for word in wordlist:
-        lemmas["word"] = lemma(word)
+        lemmas["word"] = lemmatise(word, session["language"])
     new = lemmas.counter()
 
     # create list of all words that have been created already 
@@ -292,59 +292,56 @@ def register():
 
 
 
-@app.route("/review", methods=["GET", "POST"])
+@app.route("/review")
 @login_required
 def review():
-    
-        else:
 
-        update()
-        #decide what the next card to show is and display it
+    update()
+    #decide what the next card to show is and display it
 
-        #if the reviewed percentage is greater than the new percentage, show a new card
-        #TODO: make the counts for each language independent
-        if session[session["language"]]["new_seen"]/session["new_cards"] < session[session["language"]]["reviewed"]/session[session["language"]]["review_count"] AND session["new_seen"]:
-            card = db.execute ("""SELECT * FROM user_progress 
-            JOIN words ON user_progress.word_id = words.id 
-            WHERE user_progress.user_id = ? AND user_progress.state = new AND card_id IN 
-            (SELECT card_id FROM deck_contents WHERE deck_id = ?)
-            ORDER BY ? LIMIT 1""", session["user_id"], session["deck_id"], session["order"])
-            session["state"] = "new"
+    #if the reviewed percentage is greater than the new percentage, show a new card
+    if session[session["language"]]["new_seen"]/session["new_cards"] < session[session["language"]]["reviewed"]/session[session["language"]]["review_count"] AND session["new_seen"]:
+        card = db.execute ("""SELECT * FROM user_progress 
+        JOIN words ON user_progress.word_id = words.id 
+        WHERE user_progress.user_id = ? AND user_progress.state = new AND card_id IN 
+        (SELECT card_id FROM deck_contents WHERE deck_id = ?)
+        ORDER BY ? LIMIT 1""", session["user_id"], session["deck_id"], session["order"])
+        session["state"] = "new"
 
-        #if possible, choose the longest overdue card with interval < 1 hr
-        else:
+    #if possible, choose the longest overdue card with interval < 1 hr
+    else:
+        card = db.execute ("""SELECT * FROM user_progress 
+        JOIN words ON user_progress.word_id = words.id 
+        WHERE user_progress.user_id = ? AND user_progress.state = seen AND words.language = ? 
+        AND user_pogress.due < ? AND user_progress.interval < 3600
+        ORDER BY due LIMIT 1""", session["user_id"], session["language"], datetime.now())
+
+        session["state"] = "review"
+
+        # if there is no short interval card, choose long interval card
+        if not card:
             card = db.execute ("""SELECT * FROM user_progress 
             JOIN words ON user_progress.word_id = words.id 
             WHERE user_progress.user_id = ? AND user_progress.state = seen AND words.language = ? 
-            AND user_pogress.due < ? AND user_progress.interval < 3600
+            AND user_pogress.due < ? 
             ORDER BY due LIMIT 1""", session["user_id"], session["language"], datetime.now())
+    
+    # if there are any short interval cards to review, do so before ending the session
+    if not card:
+        card = db.execute ("""SELECT * FROM user_progress 
+        JOIN words ON user_progress.word_id = words.id 
+        WHERE user_progress.user_id = ? AND user_progress.state = seen AND words.language = ? 
+            AND user_progress.interval < 3600
+        ORDER BY due LIMIT 1""", session["user_id"], session["language"])
+    
+    # if there are no cards left to review, display session over
+    if not card:
+        return render_template ("end_review.html", count = session[session["language"]]["reviewed"], new = session[session["language"]]["new_seen"])
 
-            session["state"] = "review"
-
-            # if there is no short interval card, choose long interval card
-            if not card:
-                card = db.execute ("""SELECT * FROM user_progress 
-                JOIN words ON user_progress.word_id = words.id 
-                WHERE user_progress.user_id = ? AND user_progress.state = seen AND words.language = ? 
-                AND user_pogress.due < ? 
-                ORDER BY due LIMIT 1""", session["user_id"], session["language"], datetime.now())
-        
-        # if there are any short interval cards to review, do so before ending the session
-        if not card:
-            card = db.execute ("""SELECT * FROM user_progress 
-            JOIN words ON user_progress.word_id = words.id 
-            WHERE user_progress.user_id = ? AND user_progress.state = seen AND words.language = ? 
-             AND user_progress.interval < 3600
-            ORDER BY due LIMIT 1""", session["user_id"], session["language"])
-        
-        # if there are no cards left to review, display session over
-        if not card:
-            return render_template ("end_review.html")
-
-        else:
-            session["card"]= card[0]["words.id"]
-            return render_template ("card.html", card = card)
-        
+    else:
+        session["card"]= card[0]["words.id"]
+        return render_template ("review.html", card = card)
+    
             
 
 @app.route("/search_decks" methods=["GET", "POST"])
@@ -362,10 +359,11 @@ def search_decks ()
     
     matching = ("""SELECT * FROM decks WHERE id = ?  AND language = ? AND name LIKE ? AND medium LIKE ? AND genre LIKE ? AND author LIKE ? AND date LIKE ? AND public = public"""
     , id, session["language"], name, medium, genre, author, date)
-    return render_template ("found.html")
+    return render_template ("found.html", matching = matching)
 
     else:
         return render_template ("search_decks.html")
+
 
 
 @app.route("/settings" methods = ["GET", "POST"])
@@ -480,6 +478,7 @@ def show_card():
 
         card = db.execute("""SELECT * from cards JOIN user_progress ON user_progress.card_id = cards.id 
         WHERE cards.id = ? and user_id = ?""", session["card"], session["user_id"])
+        return render_template("show_card.html", card = card)
 
 
 
