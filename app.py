@@ -1,70 +1,79 @@
 import os
+import spacy
 
-from datetime import date, time, datetime, timestamp, fromtimestamp, deltatime
+from datetime import date, time, datetime
 import sqlite3
 from flask import Flask, flash, redirect, render_template, request, session
 from flask_session import Session
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from helpers import apology, login_required, lookup, presence
+from helpers import apology, login_required, lookup, presence, update, lemmatise
 
-app = flask(__name__)
+app = Flask(__name__)
 app.config["SESSION_PERMANENT"] = False
 app.config["SESSION_TYPE"] = "filesystem"
 Session(app)
 
-con = sqlite3.connect("languagecards.db")
+con = sqlite3.connect("languagecards.db", check_same_thread=False)
 db = con.cursor()
 
 @app.route("/")
 @login_required
 def index():
 
-    update()
+    update(db)
     
-    decks = db.execute(
+    db.execute(
     """SELECT * FROM decks JOIN users_to_decks ON decks.id = users_to_decks.deck_id 
     WHERE user_id = ? AND decks.language = ?"""
     , session["user_id"], session["language"])
-        for deck in decks:
-        known = db.execute("""SELECT COUNT (*) FROM user_progress WHERE state = learning OR state = learned AND user_id = ? 
+    decks = db.fetchall()
+    for deck in decks:
+        db.execute("""SELECT COUNT (*) FROM user_progress WHERE state = learning OR state = learned AND user_id = ? 
         AND card_id IN (SELECT card_id FROM deck_contents WHERE deck_id = ?)""",
         session["user_id"], deck["decks.id"])
-        frequency = db.execute("""SELECT SUM (frequency) FROM user_progress 
+        known = db.fetchall()
+        db.execute("""SELECT SUM (frequency) FROM user_progress 
         WHERE user_id = ? AND word_id IN 
         (SELECT word_id FROM deck_contents WHERE deck_id = ?)""", session["user_id"], deck["decks.id"])
-        weighted = db.execute ("""SELECT SUM (frequency) FROM user_progress 
+        frequency = db.fetchall
+        db.execute ("""SELECT SUM (frequency) FROM user_progress 
         WHERE state = learning OR state = learned AND user_id = ? AND word_id IN 
         (SELECT word_id FROM deck_contents WHERE deck_id = ?)""", session["user_id"], deck["decks.id"])
+        weighted = db.fetchall()
         db.execute("""UPDATE users_to_decks SET progress = ? weighted = ? 
         WHERE deck_id = ? AND user_id = ?""", known/deck["decks.size"], weighted/frequency,deck[decks.id], session["user_id"])
-    order = db.execute ("SELECT deck_order FROM settings WHERE user_id = ?")[0]["deck_order"]
-    display =  db.execute("SELECT * FROM decks JOIN decks ON decks.id = users_to_decks.deck_id WHERE users_to_decks.user_id = ? ORDER BY ?", session["user_id"], order)
-
+        con.commit()
+    db.execute ("SELECT deck_order FROM settings WHERE user_id = ?")[0]["deck_order"]
+    order = db.fetchall()
+    db.execute("SELECT * FROM decks JOIN decks ON decks.id = users_to_decks.deck_id WHERE users_to_decks.user_id = ? ORDER BY ?", session["user_id"], order)
+    display = db.fetchall()
     return render_template ("mainpage.html", display = display, user = session["user_id"])
 
 
 
 @app.route("/change_language")
 @login_required
-def change_language()
+def change_language():
 
     language = request.args.get("language")
     session["language"] = language
     db.execute ("UPDATE users SET language = ? WHERE id = ?", language, session["user_id"])
+    con.commit()
     return redirect("/")
 
 
 
-@app.route("change_status")
+@app.route("/change_status")
 @login_required
 def change_status():
     status = request.args.get("status")
     id = request.args.get("id")
-    if status == public:
+    if status == "public":
         db.execute ("UPDATE decks SET status = private WHERE deck_id = ?", id)
-    if status == private:
+    if status == "private":
         db.execute ("UPDATE decks SET status = public WHERE deck_id = ?", id)
+    con.commit
     return redirect ("/")
 
 
@@ -79,7 +88,8 @@ def edit_deck():
 
     #else make a new deck that contains the same info, to be edited
     if session["user_id"] != creator:
-        deck_info = db.execute ("SELECT * FROM decks WHERE deck_id = ?", deck)
+        db.execute ("SELECT * FROM decks WHERE deck_id = ?", deck)
+        deck_info = db.fetchall
         db.execute ("""INSERT INTO decks (language, name, medium, genre, author, date, size, creator_id, public) values (?,?,?,?,?,?,?,?, private)"""
         , session["language"], deck_info[0]["name"], deck_info[0]["medium"], deck_info[0]["genre"], deck_info[0]["author"], deck_info[0]["date"], deck_info[0]["size"], session["user_id"])
         user_info = db.execute("SELECT * FROM users_to_decks WHERE user_id = ? AND deck_id = ?", session["user_id"], deck)
@@ -87,6 +97,7 @@ def edit_deck():
         db.execute ("""INSERT INTO users_to_decks (user_id, deck_id, progress, order, weighted) VALUES (?,?,?,?,?)"""
         , session["user_id"], edited_id[0]["id"], user_info[0]["progress"], user_info[0]["order"], user_info[0]["weighted"] )
         db.execute ("DELETE FROM users_to_decks WHERE user_id = ? AND deck_id = ?", session["user_id"], deck)
+    con.commit()
     session["deck_id"] = edited_id[0]["id"]
     
     return redirect ("/input")
@@ -96,28 +107,25 @@ def edit_deck():
 @app.route("/input", methods=["POST"])
 @login_required
 def input():
-
+    input_type = request.form.get("input_type")
     #display the page
     if not input_type:
-        return render_template("input.html", deck = deck)
+        return render_template("input.html", deck = session["deck_id"])
     
     # if a file is inputted, read it into a variable, split the string into a list of words
-    if input_type == f:
+    if input_type == "f":
         with open (request.form.get("input")) as file:
-            reader = file.read()
-            wordlist = split(reader)
-    if input_type == t:
-        wordlist = split(request.form.get("input"))
+            text = file.read()
+            
+    if input_type == "t":
+        text = request.form.get("input").split()
 
     # lemmatise each word and get a list of words and their frequencies
-    lemmas = []
-    for word in wordlist:
-        lemmas["word"] = lemmatise(word, session["language"])
-    new = lemmas.counter()
+    new = lemmatise(text, session["language"])
 
     # create list of all words that have been created already 
     existing = []
-    created = db.execute("SELECT * FROM words WHERE language = ?", session["language"])
+    created = db.execute("SELECT * FROM words WHERE language = ? AND public = public", session["language"])
     for word in created:
         existing.append(created[word]["word"])
     
@@ -135,26 +143,35 @@ def input():
 
     #for each word, if it is new create a card. 
     session["uncommon"] = []
-    
+
+    need_lookup = []
+
     for word in new:
         if word not in existing:
-            values = lookup(word)
+            need_lookup.append(word)
+    
+    values = lookup(need_lookup)
+    
+    for word in values:
 
-            #if data cannot be found it is an uncommon word, store for later
-            if not json["translation"]:
-                session["uncommon"].append(word)
-                session["uncommon_frequency"][0].append(cards[word])
-            db.execute ("""INSERT INTO words (word, language, definition, frequency, part, common) 
-            VALUES(?,?,?,?,?,common)""" word, session["language"], values["definition"], values["frequency"], values["part"])
+        #if data cannot be found it is an uncommon word, store for later
+        if not values[word]["translation"]:
+            session["uncommon"].append(word)
+            session["uncommon_frequency"][0].append(new[word])
+        db.execute (
+        """INSERT INTO words (word, language, definition, frequency, part, common) 
+        VALUES(?,?,?,?,?,common)""", word, session["language"], values["definition"], values["frequency"], values["part"]
+        )
 
+    for word in new:
         # TODO: rework deck updates
         # if the word is not in this deck, add it to the deck
-        word_id = db.execute ("SELECT id FROM words WHERE word = ?", word)[0]["id"]
+        word_id = db.execute ("SELECT id FROM words WHERE word = ? AND language = ? AND public = public", word)[0]["id"]
         if word_id not in contents:
-            db.execute("INSERT INTO deck_contents (deck_id, word_id, frequency) VALUES (?,?,?)" deck_id, word_id, cards[word])
+            db.execute("INSERT INTO deck_contents (deck_id, word_id, frequency) VALUES (?,?,?)", session["deck_id"], word_id, new[word])
         # if the word is in the deck, add the frequency value
         else:
-            frequency = db.execute ("SELECT frequency FROM deck_contents WHERE word_id = ?", word_id)[0]["frequency"] + cards[word]
+            frequency = db.execute ("SELECT frequency FROM deck_contents WHERE word_id = ?", word_id)[0]["frequency"] + new[word]
             db.execute ("UPDATE deck_contents SET frequency = ? WHERE word_id = ?", frequency, word_id)
         
         # add the card to user_progress or update frequency
@@ -179,7 +196,7 @@ def login():
 
     session.clear()
 
-    if request.method == POST:
+    if request.method == "POST":
 
         # check that username and password have been entered
         username = request.form.get("username")
@@ -237,11 +254,11 @@ def my_deck():
 
 
 
-@app.route("/new_deck" methods = ["GET", "POST"])
+@app.route("/new_deck", methods = ["GET", "POST"])
 @login_required
-def new_deck()
+def new_deck():
     
-    if request.method == POST:
+    if request.method == "POST":
         #get the required variables from the form
         language = request.form.get ("language")
         presence(language, "language")
@@ -267,7 +284,7 @@ def new_deck()
 @app.route("/register", methods=["GET", "POST"])
 def register():
 
-    if request.method == POST:
+    if request.method == "POST":
         # check that a username password and confirmation have been entered
         username = request.form.get("username")
         presence (username, "username")
@@ -285,6 +302,7 @@ def register():
         
         # input new user into database
         db.execute ("INSERT INTO users (username, hash) VALUES (?,?)", username, generate_password_hash(password))
+        con.commit()
         return redirect ("/")
 
     else:
@@ -296,11 +314,11 @@ def register():
 @login_required
 def review():
 
-    update()
+    update(db)
     #decide what the next card to show is and display it
 
     #if the reviewed percentage is greater than the new percentage, show a new card
-    if session[session["language"]]["new_seen"]/session["new_cards"] < session[session["language"]]["reviewed"]/session[session["language"]]["review_count"] AND session["new_seen"]:
+    if session[session["language"]]["new_seen"]/session["new_cards"] < session[session["language"]]["reviewed"]/session[session["language"]]["review_count"] and session[session["language"]]["new_seen"] < session["new_cards"]:
         card = db.execute ("""SELECT * FROM user_progress 
         JOIN words ON user_progress.word_id = words.id 
         WHERE user_progress.user_id = ? AND user_progress.state = new AND card_id IN 
@@ -344,11 +362,11 @@ def review():
     
             
 
-@app.route("/search_decks" methods=["GET", "POST"])
+@app.route ("/search_decks", methods=["GET", "POST"])
 @login_required
-def search_decks ()
+def search_decks ():
     
-    if request.method == post:
+    if request.method == "POST":
 
         id = request.form.get ("id")
         name = request.form.get("name")
@@ -357,20 +375,20 @@ def search_decks ()
         author = request.form.get("author")
         date = request.form.get("date")
     
-    matching = ("""SELECT * FROM decks WHERE id = ?  AND language = ? AND name LIKE ? AND medium LIKE ? AND genre LIKE ? AND author LIKE ? AND date LIKE ? AND public = public"""
-    , id, session["language"], name, medium, genre, author, date)
-    return render_template ("found.html", matching = matching)
+        matching = ("""SELECT * FROM decks WHERE id = ?  AND language = ? AND name LIKE ? AND medium LIKE ? AND genre LIKE ? AND author LIKE ? AND date LIKE ? AND public = public"""
+        , id, session["language"], name, medium, genre, author, date)
+        return render_template ("found.html", matching = matching)
 
     else:
         return render_template ("search_decks.html")
 
 
 
-@app.route("/settings" methods = ["GET", "POST"])
+@app.route("/settings", methods = ["GET", "POST"])
 @login_required
 def settings ():
     
-    if request.method == post:
+    if request.method == "POST":
         
         #update card order
         card_order = request.form.get ("card_order")
@@ -392,14 +410,14 @@ def settings ():
 
 
 
-@app.route("/show_card" methods = ["GET", "POST"])
+@app.route("/show_card", methods = ["GET", "POST"])
 @login_required
 def show_card():
 
     if request.method =="POST":       
 
         #reset time
-        update()
+        update(db)
 
         #get the value of multiplier
         multiplier = request.form.get("multiplier")
@@ -413,7 +431,8 @@ def show_card():
                 interval *= multiplier
                 if interval < 86400:
                     interval = 86400
-            else interval = 600
+            else:
+                interval = 600
 
             if multiplier != 0.05:
                 due = interval + session["datetime"]
@@ -422,13 +441,13 @@ def show_card():
 
         #if not, use the preset values for short periods
         else: 
-            if multiplier = 0:
+            if multiplier == 0:
                 interval = 600
-            elif multiplier = 0.05:
+            elif multiplier == 0.05:
                 interval = 43200
-            elif multiplier = 1:
+            elif multiplier == 1:
                 interval = 86400
-            elif multiplier = 2:
+            elif multiplier == 2:
                 interval = 345600
             else:
                 interval = 846000
@@ -440,24 +459,24 @@ def show_card():
         WHERE user_id = ? AND word_id = ?""", due, session["datetime"], interval, viewings["viewings"] + 1, session["user_id"], session["card"])
         
         #update the specific viewing category
-        if multiplier = 0:
+        if multiplier == 0:
             db.execute("""UPDATE user_progress SET none = ? WHERE user_id = ? AND card_id = ?"""
             , viewings["none"] + 1, session["user_id"], session["card"])
-        elif multiplier = 0.05:
+        elif multiplier == 0.05:
             db.execute("""UPDATE user_progress SET some = ? WHERE user_id = ? AND card_id = ?"""
             , viewings["some"] + 1, session["user_id"], session["card"])
-        elif multiplier = 1:
+        elif multiplier == 1:
             db.execute("""UPDATE user_progress SET okay = ? WHERE user_id = ? AND card_id = ?"""
             , viewings["okay"] + 1, session["user_id"], session["card"])
-        elif multiplier = 2:
+        elif multiplier == 2:
             db.execute("""UPDATE user_progress SET good = ? WHERE user_id = ? AND card_id = ?"""
             , viewings["good"] + 1, session["user_id"], session["card"])
-        elif multiplier = 3:
+        elif multiplier == 3:
             db.execute("""UPDATE user_progress SET easy = ? WHERE user_id = ? AND card_id = ?"""
             , viewings["easy"] + 1, session["user_id"], session["card"])
         
         #if already seen, update state and the number of reviews
-        if session["state"] = "review":
+        if session["state"] == "review":
             if interval < 2500000:
                 db.execute ("""UPDATE user_progress SET state = ? WHERE user_id = ? AND card_id = ?"""
                 , "learned", session["user_id"], session["card"])
@@ -482,7 +501,7 @@ def show_card():
 
 
 
-@app.route("/uncommon" methods = ["GET", "POST"])
+@app.route("/uncommon", methods = ["GET", "POST"])
 @login_required
 def uncommon():
 
@@ -497,9 +516,9 @@ def uncommon():
             VALUES (?,?,?,?,?,?, uncommon)""", session["language"], session["uncommon"][0], definition, frequency, example, part)
             db.execute("""INSERT INTO user_progress (user_id, word_id, viewings, easy, good, ok, some, none, state, frequency) 
             VALUES (?,(SELECT id FROM words WHERE word = ? AND language = ? AND definition = ? and common = uncommon),0,0,0,0,0,0, new)""",
-            session["user_id"], session["uncommon"][0], language, definition, session["uncommon_frequency"][0])
+            session["user_id"], session["uncommon"][0], session["language"], definition, session["uncommon_frequency"][0])
             db.execute ("""INSERT INTO deck_contents (deck_id, card_id, frequency) 
-            VALUES (?,(SELECT id FROM words WHERE word = ? AND language = ? AND definition = ? and common = uncommon),?)""", session["deck_id"], session["uncommon"][0], language, definition, session["uncommon_frequency"][0])
+            VALUES (?,(SELECT id FROM words WHERE word = ? AND language = ? AND definition = ? and common = uncommon),?)""", session["deck_id"], session["uncommon"][0], session["language"], definition, session["uncommon_frequency"][0])
 
         session["uncommon"].pop(0)
         session["uncommon_frequency"].pop(0)
