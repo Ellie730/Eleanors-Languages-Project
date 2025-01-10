@@ -13,6 +13,9 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 languages = ["German", "Italian", "Spanish"]
 
+con = sqlite3.connect("languagecards.db", check_same_thread=False)
+db = con.cursor()
+
 def apology(message, code=400):
     """Render message as an apology to user."""
 
@@ -136,28 +139,33 @@ def presence(variable, vname):
 
 
 
-def update(db):
+def update():
         #if new day reset new card counter
-    last = db.execute ("SELECT time FROM users WHERE id = ?", session["user_id"])[0]["date"]
+    db.execute ("SELECT time FROM users WHERE id = ?", session["user_id"])
+    last = db.fetchall()[0]["date"]
     if datetime.date.fromtimestamp(last) != date.today():
         for language in languages:
             session[language]["new_seen"] = 0
             session[language]["reviewed"] = 0
-            session[language]["day_start"] = db.execute("""SELECT COUNT (*) FROM user_progress 
+            db.execute("""SELECT COUNT (*) FROM user_progress 
             WHERE due < ? AND user_id = ? AND card_id IN 
             (SELECT id FROM cards WHERE language = ?)"""
             , session["datetime"], session["user_id"], language)
+            session[language]["day_start"] = db.fetchall()
         
     #reset time
     session["datetime"] = datetime.now().timestamp()
     #find the number of cards to review
-    session[session["language"]]["review_count"] = db.execute("""SELECT COUNT (*) FROM user_progress 
+    db.execute("""SELECT COUNT (*) FROM user_progress 
     WHERE due < ? AND user_id = ? AND card_id IN 
     (SELECT id FROM cards WHERE language = ?)"""
     , session["datetime"], session["user_id"], session["language"])
-    session["new_cards"] = db.execute("SELECT * FROM users WHERE id = ?", session["user_id"])[0]["new_cards"]
+    session[session["language"]]["review_count"] = db.fetchall()
+    db.execute("SELECT * FROM users WHERE id = ?", session["user_id"])[0]["new_cards"]
+    session["new_cards"] = db.fetchall()
     #update the time in the database
     db.execute("""UPDATE users SET time = ? WHERE id = ?""", session["datetime"], session["user_id"])
+    con.commit()
     
     
 
