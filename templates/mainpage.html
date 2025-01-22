@@ -6,6 +6,7 @@ mainpage
 
 {% block body %}
 
+<meta id="user_id" data-name="{{session[user_id]}}">
 <table>
     <thead>
         <tr>
@@ -20,22 +21,50 @@ mainpage
             <th>size</th>
             <th>public or private</th>
             <th>edit deck</th>
-            <th></th>
         </tr>
     </thead>
     <tbody>
         {% for row in display %}
         <tr>
-            <td>{{ row.deck.id }}</td>
-            <td>{{ row.deck.name }}</td>
-            <td>{{ row.deck.author }} </td>
-            <td>{{ row.deck.date }}</td>
-            <td>{{ row.deck.medium }}</td>
-            <td>{{ row.deck.genre }}</td>
-            <td>{{ row.users_to_decks.progress }}</td>
-            <td>{{ row.users_to_decks.weighted }}</td>
-            <td>{{ row.deck.public }} {% if user == row.deck.creator %}<a href = "/change_status?status=?&id=?", {{ row.deck.public }}, {{ row.deck.id }}><button> change </button></a>{% endif %}</td>
-            <td><a href = "/edit_deck?deck=?", {{ row.deck.id }}><button>edit deck</button></a></td>
+            <meta id="deck_id" data-id="{{row.0}}" data-state>
+            <td>{{ row.0 }}</td>
+            <td>{{ row.2 }}</td>
+            <td>{{ row.3 }} </td>
+            <td>{{ row.4 }}</td>
+            <td>{{ row.5 }}</td>
+            <td>{{ row.6 }}</td>
+            <td>{{ row.12 }}</td>
+            <td>{{ row.14 }}</td>
+            <td>{{ row.7 }}</td>
+            <td>{{ row.9 }} 
+                {% if user == row.8 %}
+                <form action="/change_status" method="post">
+                    <input name="deck_id" type="hidden" value="{{ row.0 }}">
+                    <input name="state" type="hidden" value="{{ row.9 }}">
+                    <button type="submit">Change</button>
+                </form>
+                {% endif %}
+            </td>
+            <td>
+                <form action="edit_deck" method="post">
+                    <input name="deck_id" type="hidden" value="{{ row.0 }}">
+                    <button type="submit">Edit Deck</button>
+                </form>
+            </td>
+            </tr>
+            <script>
+                
+                function changeStatus() {
+                    var deck = $('#deck_id').data().value;
+                    $.ajax({
+                        url: "/change_status",
+                        type: "POST",
+                        data: { "deck_id":deck }
+
+                    })
+                }
+
+            </script>
         </tr>
         {% endfor %}
     </tbody>

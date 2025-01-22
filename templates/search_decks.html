@@ -1,4 +1,4 @@
-{% extends "layout.html"}
+{% extends "layout.html" %}
 
 {% block title %}
 
@@ -13,12 +13,12 @@ uncommon
 <h3> {{word}}</h3>
 
 <form action="/uncommon" method="post">
-    <input autocomplete="off" autofocus type="number" name="id" value="id">
-    <input autocomplete="off" autofocus type="text" name="name" value="name">
-    <input autocomplete="off" autofocus type="text" name="author" value="author">
-    <input autocomplete="off" autofocus type="text" name="medium" value="medium">
-    <input autocomplete="off" autofocus type="text" name="genre" value="genre">
-    <input autocomplete="off" autofocus type="text" name="date" value="date of publication">
+    <input autocomplete="off" autofocus type="number" name="id" placeholder="id">
+    <input autocomplete="off" autofocus type="text" name="name" placeholder="name">
+    <input autocomplete="off" autofocus type="text" name="author" placeholder="author">
+    <input autocomplete="off" autofocus type="text" name="medium" placeholder="medium">
+    <input autocomplete="off" autofocus type="text" name="genre" placeholder="genre">
+    <input autocomplete="off" autofocus type="text" name="date" placeholder="date of publication">
     <input type="submit" value="Submit">
 </form>
 

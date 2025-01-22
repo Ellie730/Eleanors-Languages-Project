@@ -51,7 +51,7 @@ def lemmatise(text, language):
     
     if language == "Spanish":
 
-        nlp = spacy.load("sp_core_news_sm")
+        nlp = spacy.load("es_core_news_sm")
 
     doc = nlp(text)
 
@@ -89,6 +89,8 @@ def lookup(wordlist, language):
             temp = get_definition(word)
 
             values[word]["definition"] = temp["definizione"]
+            if not values[word]["definition"]:
+                session["uncommon"].append(word)
             values[word]["part"] = temp["grammatica"]
             return values
 
@@ -123,6 +125,8 @@ def lookup(wordlist, language):
 
             #add the definition string and the word to a list
             values[word]["definition"] = existing
+            if not values[word]["definition"]:
+                session["uncommon"].append(word)
             values[word]["part"] = (matching[0].t.text).translate({ord(i) : None for i in '{}'})
 
         return values
@@ -141,30 +145,27 @@ def presence(variable, vname):
 
 def update():
         #if new day reset new card counter
-    db.execute ("SELECT time FROM users WHERE id = ?", session["user_id"])
-    last = db.fetchall()[0]["date"]
-    if datetime.date.fromtimestamp(last) != date.today():
-        for language in languages:
-            session[language]["new_seen"] = 0
-            session[language]["reviewed"] = 0
-            db.execute("""SELECT COUNT (*) FROM user_progress 
-            WHERE due < ? AND user_id = ? AND card_id IN 
-            (SELECT id FROM cards WHERE language = ?)"""
-            , session["datetime"], session["user_id"], language)
-            session[language]["day_start"] = db.fetchall()
-        
-    #reset time
+    db.execute ("SELECT time FROM users WHERE id = ?", (session["user_id"],))
+    try:
+        last = date(db.fetchall()[0][0])
+    except TypeError:
+        last = 0
+    
     session["datetime"] = datetime.now().timestamp()
+    if last != date.today():
+        for language in languages:
+            session.update({f"{language}":{"new_seen":0, "reviewed":0}})
+        
     #find the number of cards to review
-    db.execute("""SELECT COUNT (*) FROM user_progress 
-    WHERE due < ? AND user_id = ? AND card_id IN 
-    (SELECT id FROM cards WHERE language = ?)"""
-    , session["datetime"], session["user_id"], session["language"])
+    db.execute("""SELECT COUNT (*) FROM user_progress
+    WHERE due < ? AND user_id = ? AND word_id IN 
+    (SELECT id FROM words WHERE language = ?)"""
+    , (session["datetime"], session["user_id"], session["language"]))
     session[session["language"]]["review_count"] = db.fetchall()
-    db.execute("SELECT * FROM users WHERE id = ?", session["user_id"])[0]["new_cards"]
-    session["new_cards"] = db.fetchall()
+    db.execute("SELECT * FROM users WHERE id = ?", (session["user_id"],))
+    session["new_cards"] = db.fetchall()[0][5]
     #update the time in the database
-    db.execute("""UPDATE users SET time = ? WHERE id = ?""", session["datetime"], session["user_id"])
+    db.execute("""UPDATE users SET time = ? WHERE id = ?""", (session["datetime"], session["user_id"]))
     con.commit()
     
     
