@@ -135,6 +135,7 @@ def input():
         # lemmatise each word and get a list of words and their frequencies
         contents = lemmatise(text, session["language"])
 
+        return contents
         # create list of all words that have been created already 
         existing = []
         db.execute("SELECT * FROM words WHERE language = ? AND common = Common", (session["language"],))
@@ -168,6 +169,8 @@ def input():
         
         values = lookup(need_lookup, session["language"])
         
+        return values
+        
         for word in values:
 
             #if data cannot be found it is an uncommon word, store for later
@@ -185,13 +188,13 @@ def input():
             # TODO: rework deck updates
             # if the word is not in this deck, add it to the deck
             db.execute ("SELECT id FROM words WHERE word = ? AND language = ? AND public = public", (word,))
-            word_id = db.fetchall()[0]["id"]
+            word_id = db.fetchall()[0][0]
             if word_id not in contents:
                 db.execute("INSERT INTO deck_contents (deck_id, word_id, frequency) VALUES (?,?,?)", (session["deck_id"], word_id, contents[word]))
             # if the word is in the deck, add the frequency value
             else:
                 db.execute ("SELECT frequency FROM deck_contents WHERE word_id = ?", (word_id,))
-                frequency = db.fetchall()[0]["frequency"] + contents[word]
+                frequency = db.fetchall()[0][0] + contents[word]
                 db.execute ("UPDATE deck_contents SET frequency = ? WHERE word_id = ?", (frequency, word_id))
             
             # add the card to user_progress or update frequency
@@ -272,15 +275,15 @@ def logout():
 def my_deck():
 
     #display 50 cards in the deck
-    page = request.args.get("page")
+    page = int(request.args.get("page"))
     db.execute ("SELECT size FROM decks WHERE deck_id  = ?", (session["deck_id"],))
-    pages = int((db.fetchall()[0]["size"] - 1)/50)
+    pages = int((db.fetchall()[0][0] - 1)/50)
     db.execute ("SELECT card_order FROM users WHERE id = ?", (session["user_id"],))
-    order = db.fetchall()[0]["card_order"]
+    order = db.fetchall()[0][0]
     db.execute (""" SELECT * from words
     JOIN user_progress ON words.id = user_progress.word_id
-    WHERE deck_id = ? AND user_id = ?
-    ORDER BY ? LIMIT ?,50""", (session["deck_id"], session["user_id"], order, 50*page))
+    WHERE id IN (SELECT card_id FROM deck_contents WHERE deck_id = ?) AND user_id = ?
+    ORDER BY ? LIMIT ?, 50""", (session["deck_id"], session["user_id"], order, 50*page))
     cards = db.fetchall()
     return render_template ("deck.html", cards = cards, page = page, pages=pages)
 
@@ -585,3 +588,10 @@ def uncommon():
 
         else:
             return render_template ("uncommon.html", word = word)
+        
+@app.route("/view_deck", methods=["POST"])
+@login_required
+def view_deck():
+    session["deck_id"] = request.form.get("deck")
+    return redirect ("/my_deck?page=0")
+

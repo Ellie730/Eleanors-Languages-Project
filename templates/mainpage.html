@@ -21,6 +21,7 @@ mainpage
             <th>size</th>
             <th>public or private</th>
             <th>edit deck</th>
+            <th>view contents</th>
         </tr>
     </thead>
     <tbody>
@@ -50,6 +51,12 @@ mainpage
                     <input name="deck_id" type="hidden" value="{{ row.0 }}">
                     <button type="submit">Edit Deck</button>
                 </form>
+            </td>
+            <td>
+                <form action="view_deck" method="post">
+                    <input name="deck" type="hidden" value="{{ row.0 }}">
+                    <button type="submit">View</button>
+                </form>     
             </td>
             </tr>
             <script>
