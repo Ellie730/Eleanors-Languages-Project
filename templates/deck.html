@@ -45,16 +45,21 @@ deck
 </table>
 {% endfor %}
 
-{% if {{page}} != 0}
+{% if page != 0 %}
 
-<a href = "/deck?page=?" page - 1><button>back</button></a>
+<form action="/my_deck">
+    <input name="page" type="hidden" value="{{ page - 1 }}">
+    <button type="submit">back</button>
+</form>
 
 {% endif %}
 
-{% if {{page}} < {{pages}} %}
+{% if page < pages %}
 
-<a href = "/deck?page=?" page + 1><button>next</button></a>
-
-{{% endif %}}
+<form action="/my_deck">
+    <input name="page" type="hidden" value="{{ page + 1 }}">
+    <button type="submit">back</button>
+</form>
+{% endif %}
 
 {% endblock %}
